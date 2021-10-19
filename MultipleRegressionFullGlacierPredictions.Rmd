@@ -1,0 +1,113 @@
+---
+title: "Multiple Regression Cross-Validation"
+author: "Max Barshay"
+date: "8/19/2021"
+output: html_document
+---
+
+```{r}
+library(coda)
+library(rstan)
+library(Rcpp)
+```
+
+
+```{r}
+load("/Users/mdbarshay/Documents/GlacialModeling/Final_MR_Results.Rdata")
+load("/Users/mdbarshay/Documents/GlacialModeling/Final_MR_Summary.Rdata")
+```
+
+
+```{r}
+MB_2015 = read.csv("/Users/mdbarshay/Desktop/FROST/Glaciology_Data_for_Max/mb_by_year/Mass_balance_data-2015.csv")
+MB_2015
+```
+
+
+```{r}
+X_mean = mean(MB_2015[,"x.i93"])
+X_sd = sd(MB_2015[,"x.i93"])
+Y_mean = mean(MB_2015[,"y.i93"])
+Y_sd = sd(MB_2015[,"y.i93"])
+elevation_mean = mean(MB_2015[,"elvev.m.a.s.l."])
+elevation_sd = sd(MB_2015[,"elvev.m.a.s.l."])
+```
+
+
+```{r}
+full_glacier = read.table("/Users/mdbarshay/Desktop/FROST/Glaciology_Data_for_Max/LaJokull-2015-maiWV100x100.dat", sep=" ")
+```
+
+
+```{r}
+full_glacier[full_glacier == 1.70141e+38] = 0
+```
+
+```{r}
+full_glacier[,"index"] = 0:(length(full_glacier[,"V1"]) - 1)
+```
+
+```{r}
+full_glacier = full_glacier[,c(4,1,2,3)]
+```
+
+```{r}
+colnames(full_glacier) = c("index", "x_coord", "y_coord", "elevation")
+full_glacier
+```
+
+```{r}
+zero_rows = full_glacier[,"elevation"] == 0
+head(zero_rows)
+```
+
+
+```{r}
+full_glacier[,"x_coord"] = (full_glacier[,"x_coord"] - X_mean) / X_sd
+full_glacier[,"y_coord"] = (full_glacier[,"y_coord"] - Y_mean) / Y_sd
+full_glacier[,"elevation"] = (full_glacier[,"elevation"] - elevation_mean) / elevation_sd
+```
+
+```{r}
+# using cbind so they don't point to same place in memory
+standardized_glacier = cbind(full_glacier)
+standardized_glacier
+```
+
+```{r}
+standardized_subsetted_glacier = standardized_glacier[!zero_rows,]
+standardized_subsetted_glacier
+```
+
+
+
+
+```{r}
+len = length(standardized_subsetted_glacier[,"index"])
+empty = numeric(len)
+standardized_subsetted_glacier[,"predictions"] = empty
+for (i in 1:len){
+  N = length(results[,"beta0"])
+  prediction = results[, "beta0"] + results[, "beta1"] * standardized_subsetted_glacier[i,"x_coord"] + results[, "beta2"] * standardized_subsetted_glacier[i,"y_coord"] + results[, "beta3"] * standardized_subsetted_glacier[i,"elevation"] + (rt(N, results[,"nu"]) * results[,"sigma"])
+  standardized_subsetted_glacier[i,"predictions"] = mean(prediction)
+}
+
+```
+
+
+```{r}
+standardized_subsetted_glacier
+```
+
+```{r}
+standardized_glacier
+```
+
+```{r}
+write.csv(standardized_subsetted_glacier, file="MR_standardized_subsetted_glacier.csv")
+```
+
+```{r}
+write.csv(standardized_glacier, file="MR_standardized_glacier.csv")
+```
+

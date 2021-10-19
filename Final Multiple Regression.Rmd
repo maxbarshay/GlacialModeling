@@ -1,0 +1,127 @@
+---
+title: "Multiple Regression"
+author: "Max Barshay"
+date: "9/23/2021"
+output: html_document
+---
+
+```{r}
+library(coda)
+library(rstan)
+library(Rcpp)
+source("/Users/mdbarshay/Documents/GlacialModeling/DBDA2E-utilities.R")
+source("/Users/mdbarshay/Documents/GlacialModeling/MaxUtilities.R")
+```
+
+```{r}
+MB_2015 = read.csv("/Users/mdbarshay/Desktop/FROST/Glaciology_Data_for_Max/mb_by_year/Mass_balance_data-2015.csv")
+MB_2015
+```
+
+```{r}
+modelString = "
+  data {
+    int<lower=1> N;
+    int<lower=1> D;
+    vector[D] x[N];
+    vector[N] MB_W;
+    real mean_MB_W;
+    real sd_MB_W;
+    real sd_x_coord;
+    real sd_y_coord;
+    real sd_elevation;
+
+  }
+  transformed data {
+    real unifLo;
+    real unifHi;
+    real expLambda;
+    real beta0sigma;
+    real beta1sigma;
+    real beta2sigma;
+    real beta3sigma;
+    unifLo = sd_MB_W/1000;
+    unifHi = sd_MB_W*1000;
+    expLambda = 1/29.0;
+    beta1sigma = 10*fabs(sd_MB_W/sd_x_coord); // these priors are based off ideas from Doing Bayesian Data Analysis by Kruschke
+    beta2sigma = 10*fabs(sd_MB_W/sd_y_coord);
+    beta3sigma = 10*fabs(sd_MB_W/sd_elevation);
+    beta0sigma = 10*fabs(mean_MB_W*sd_MB_W/sd_x_coord);
+
+  }
+  parameters {
+    real beta0;
+    real beta1;
+    real beta2;
+    real beta3;
+    real<lower=0> nuMinusOne;
+    real<lower=0.0001> sigma;
+  }
+  transformed parameters {
+    real<lower=0> nu;
+    nu = nuMinusOne + 1;
+  }
+  model {
+    sigma ~ uniform(unifLo, unifHi);
+    nuMinusOne ~ exponential(expLambda);
+    beta0 ~ normal(0, beta0sigma);
+    beta1 ~ normal(0, beta1sigma);
+    beta2 ~ normal(0, beta2sigma);
+    beta3 ~ normal(0, beta3sigma);
+    for (i in 1:N){
+      MB_W[i] ~ student_t(nu, beta0 + beta1 * x[i,1] + beta2 * x[i,2] + beta3 * x[i,3], sigma); // note that we have a t-distributed linear regression for robustness
+    }
+  }
+"
+```
+
+```{r}
+x_coord = (MB_2015[,"x.i93"] - mean(MB_2015[,"x.i93"])) / sd(MB_2015[,"x.i93"])
+y_coord = (MB_2015[,"y.i93"] - mean(MB_2015[,"y.i93"])) / sd(MB_2015[,"y.i93"])
+elevation = (MB_2015[,"elvev.m.a.s.l."] - mean(MB_2015[,"elvev.m.a.s.l."])) / sd(MB_2015[,"elvev.m.a.s.l."])
+x = cbind(x_coord, y_coord, elevation)
+MB_W = MB_2015[,"bw"]
+
+dataList = list(
+  N = length(MB_W),
+  D = 3,
+  x = x,
+  MB_W = MB_W,
+  mean_MB_W = mean(MB_W) ,
+  sd_MB_W = sd(MB_W) ,
+  sd_x_coord = sd(x_coord),
+  sd_y_coord = sd(y_coord),
+  sd_elevation = sd(elevation)
+)
+
+stanDso <- stan_model(model_code=modelString) 
+
+stanFit <- sampling( object=stanDso, 
+                       data = dataList, 
+                       #pars = parameters , # optional
+                       chains = 5,
+                       iter = 10000, # this could be more potentially 
+                       warmup = 500, 
+                       #init = initsList , # optional
+                       thin = 1)
+
+mcmcCoda = mcmc.list(lapply( 1:ncol(stanFit) , 
+                                 function(x) { mcmc(as.array(stanFit)[,x,]) }))
+
+summary = smryMCMC_MR(mcmcCoda)
+
+MCSE = summary[,"SD"] / sqrt(summary[,"ESS"])
+summary = cbind(summary, MCSE)
+
+MR_Summary = summary[,c("Mean", "Median", "Mode", "SD", "ESS", "HDImass", "HDIlow", "HDIhigh", "MCSE")]
+
+MR_Results = as.matrix(mcmcCoda, chains=T)
+```
+
+```{r}
+save(MR_Summary, file="Final_MR_Summary.Rdata")
+save(MR_Results, file="Final_MR_Results.Rdata")
+```
+
+
+
